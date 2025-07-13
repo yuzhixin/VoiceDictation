@@ -1,0 +1,22 @@
+{
+  "name": "xf-voice",
+  "version": "1.0.0",
+  "description": "讯飞大模型语音识别sdk",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yuzhixin/VoiceDictation.git"
+  },
+  "keywords": [
+    "语音识别，讯飞sdk"
+  ],
+  "author": "hero",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/yuzhixin/VoiceDictation/issues"
+  },
+  "homepage": "https://github.com/yuzhixin/VoiceDictation#readme"
+}
