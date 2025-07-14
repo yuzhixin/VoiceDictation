@@ -25,6 +25,7 @@
             // 识别监听方法
             this.onTextChange = opts.onTextChange || Function();
             this.onWillStatusChange = opts.onWillStatusChange || Function();
+            this.onError = opts.onError || Function();
 
             // 方言/语种
             this.status = 'null'
@@ -78,7 +79,7 @@
             const self = this;
             try {
                 if (!self.APPID || !self.APIKey || !self.APISecret) {
-                    alert('请正确配置【迅飞语音听写（流式版）WebAPI】服务接口认证信息！');
+                    self.onError('请正确配置【迅飞语音听写（流式版）WebAPI】服务接口认证信息！');
                 } else {
                     self.webWorker = new Worker('./js/transcode.worker.js');
                     self.webWorker.onmessage = function (event) {
@@ -86,7 +87,7 @@
                     };
                 }
             } catch (error) {
-                alert('对不起：请在服务器环境下运行！');
+                self.onError('对不起：请在服务器环境下运行！');
                 console.error('请在服务器如：WAMP、XAMPP、Phpstudy、http-server、WebServer等环境中运行！', error);
             };
         };
@@ -124,7 +125,7 @@
                 } else if ('MozWebSocket' in window) {
                     iatWS = new MozWebSocket(url);
                 } else {
-                    alert('浏览器不支持WebSocket!');
+                    this.onError('浏览器不支持WebSocket!');
                     return false;
                 }
                 this.webSocket = iatWS;
@@ -154,12 +155,12 @@
                 this.audioContext = this.audioContext ? this.audioContext : new (window.AudioContext || window.webkitAudioContext)();
                 this.audioContext.resume();
                 if (!this.audioContext) {
-                    alert('浏览器不支持webAudioApi相关接口');
+                    this.onError('浏览器不支持webAudioApi相关接口');
                     return false;
                 }
             } catch (e) {
                 if (!this.audioContext) {
-                    alert('浏览器不支持webAudioApi相关接口');
+                    this.onError('浏览器不支持webAudioApi相关接口');
                     return false;
                 }
             };
@@ -183,7 +184,7 @@
             };
             // 获取浏览器录音权限失败时回调
             let getMediaFail = (e) => {
-                alert('对不起：录音权限获取失败!');
+                    this.onError('对不起：录音权限获取失败!');
                 this.audioContext && this.audioContext.close();
                 this.audioContext = undefined;
                 // 关闭websocket
@@ -215,7 +216,7 @@
                 if (navigator.userAgent.toLowerCase().match(/chrome/) && location.origin.indexOf('https://') < 0) {
                     console.error('获取浏览器录音功能，因安全性问题，需要在localhost 或 127.0.0.1 或 https 下才能获取权限！');
                 } else {
-                    alert('对不起：未识别到录音设备!');
+                    this.onError('对不起：未识别到录音设备!');
                 }
                 this.audioContext && this.audioContext.close();
                 return false;
