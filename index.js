@@ -342,6 +342,9 @@
                         resultText: str
                     });
                 }
+                if (ws.ls === true) {
+                    this.setStatus('end');
+                }
             }
             if (jsonData.header.code === 0 && jsonData.header.status === 2) {
                 this.webSocket.close();
