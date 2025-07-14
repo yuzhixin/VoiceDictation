@@ -4,6 +4,7 @@ declare module 'xf-voice' {
     APIKey: string;
     APIsecret: string;
     onTextChange?: (text: string) => void;
+    onError?:(error: string)=> void;
     onWillStatusChange?: (oldStatus: string, newStatus: string) => void;
     language?: string;
     accent?: string;
@@ -15,7 +16,6 @@ declare module 'xf-voice' {
     constructor(options: XfVoiceOptions);
     start(): void;
     stop(): void;
-    onError(error: string): void;
     setStatus(status: string): void;
     setResultText(params: { resultText?: string, resultTextTemp?: string }): void;
     setParams(params: { language?: string, accent?: string }): void;
