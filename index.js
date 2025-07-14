@@ -11,7 +11,7 @@
     };
 }(typeof window !== "undefined" ? window : this, () => {
     "use strict";
-    return class IatRecorder {
+    return new class IatRecorder {
         constructor(opts = {}) {
             // 服务接口认证信息(语音听写（流式版）WebAPI)
             this.APPID = opts.APPID || '';
