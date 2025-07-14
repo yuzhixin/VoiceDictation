@@ -237,14 +237,11 @@ class XfVoiceDictation {
                     if (ws.ls === false) {
                         str = ws.ws.map(element => element.cw[0].w).join('');
                     }
-                    // 处理中间结果
-                    else if (ws.ls === true && ws.ws) {
-                        str = ws.ws.map(element => element.cw[0].w).join('');
-                        this.setResultText({ resultTextTemp: str });
-                    }
-
                     if (str) {
                         this.setResultText({ resultText: str });
+                    }
+                    if (ws.ls === true) {
+                        this.setStatus("end");
                     }
                 } catch (e) {
                     this.onError(`解析语音结果失败: ${e.message}`);
