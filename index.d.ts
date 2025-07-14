@@ -2,7 +2,7 @@ declare module 'xf-voice' {
   interface XfVoiceOptions {
     APPID: string;
     APIKey: string;
-    APISecret: string;
+    APIsecret: string;
     onTextChange?: (text: string) => void;
     onWillStatusChange?: (oldStatus: string, newStatus: string) => void;
     language?: string;
@@ -20,5 +20,5 @@ declare module 'xf-voice' {
     setParams(params: { language?: string, accent?: string }): void;
   }
 
-  export = XfVoiceDictation;
+  export default XfVoiceDictation;
 }

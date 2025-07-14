@@ -1,11 +1,13 @@
 ; (function (window, voice) {
     "use strict";
+    const VoiceClass = voice();
     if (typeof define === 'function' && define.amd) {
-        define(voice);
+        define(VoiceClass);
     } else if (typeof exports === 'object') {
-        module.exports = voice();
+        module.exports = VoiceClass;
+        module.exports.default = VoiceClass;
     } else {
-        window.XfVoiceDictation = voice();
+        window.XfVoiceDictation = VoiceClass;
     };
 }(typeof window !== "undefined" ? window : this, () => {
     "use strict";
