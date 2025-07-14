@@ -1,6 +1,6 @@
 {
   "name": "xf-voice",
-  "version": "1.1.3",
+  "version": "1.1.4",
   "description": "讯飞语音听写(流式版)WebAPI的React/Node.js SDK",
   "type": "module",
   "main": "index.js",

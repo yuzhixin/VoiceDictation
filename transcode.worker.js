@@ -1,5 +1,4 @@
-(function () {
-    const self = this;
+(() => {
     const transAudioData = {
         to16kHz(audioData) {
             var data = new Float32Array(audioData);
@@ -36,7 +35,7 @@
             // return output
         }
     };
-    this.onmessage = function (e) {
+    self.onmessage = function (e) {
         transAudioData.transcode(e.data);
     };
 })()
