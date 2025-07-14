@@ -1,6 +1,6 @@
 # xf-voice
 
-讯飞语音听写(流式版)WebAPI的Node.js SDK
+讯飞语音听写(流式版)WebAPI的React/Node.js SDK
 
 ## 安装
 
@@ -9,6 +9,8 @@ npm install xf-voice
 ```
 
 ## 使用示例
+
+### Node.js 环境
 
 ```javascript
 const XfVoiceDictation = require('xf-voice');
@@ -29,6 +31,42 @@ recorder.start();
 setTimeout(() => {
   recorder.stop();
 }, 5000);
+```
+
+### React 环境
+
+```jsx
+import React, { useState, useEffect } from 'react';
+import XfVoiceDictation from 'xf-voice';
+
+function VoiceRecorder() {
+  const [text, setText] = useState('');
+  
+  useEffect(() => {
+    const recorder = new XfVoiceDictation({
+      APPID: '你的APPID',
+      APIKey: '你的APIKey',
+      APISecret: '你的APISecret',
+      onTextChange: (result) => {
+        setText(result);
+      }
+    });
+
+    return () => {
+      recorder.stop();
+    };
+  }, []);
+
+  return (
+    <div>
+      <button onClick={() => recorder.start()}>开始录音</button>
+      <button onClick={() => recorder.stop()}>停止录音</button>
+      <div>识别结果: {text}</div>
+    </div>
+  );
+}
+
+export default VoiceRecorder;
 ```
 
 ## API
@@ -54,7 +92,10 @@ setTimeout(() => {
 
 ## 注意事项
 
-1. 需要在服务端环境下运行
-2. 需要有效的讯飞开放平台账号和API权限
-3. 浏览器需要支持Web Audio API和WebSocket
-4. 在Chrome浏览器中需要在https或localhost环境下才能获取麦克风权限
+1. React项目需要v16.8+版本(支持Hooks)
+2. 需要在服务端环境下运行
+3. 需要有效的讯飞开放平台账号和API权限
+4. 浏览器需要支持Web Audio API和WebSocket
+5. 在Chrome浏览器中需要在https或localhost环境下才能获取麦克风权限
+6. 使用React时，建议在组件卸载时调用stop()方法
+7. Worker文件需要正确放置在public/js/目录下
