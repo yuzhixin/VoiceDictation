@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import CryptoJS from "crypto-js";
 
 class XfVoiceDictation {
     constructor(opts = {}) {
@@ -39,7 +40,6 @@ class XfVoiceDictation {
         return new Promise((resolve, reject) => {
             const { url, host, APISecret, APIKey } = this;
             try {
-                const CryptoJS = require('crypto-js');
                 let date = new Date().toGMTString(),
                     algorithm = 'hmac-sha256',
                     headers = 'host date request-line',
@@ -94,6 +94,20 @@ class XfVoiceDictation {
             binary += String.fromCharCode(bytes[i]);
         }
         return window.btoa(binary);
+    }
+
+    base64ToUtf8(base64Str) {
+        try {
+            const binaryStr = atob(base64Str);
+            const bytes = new Uint8Array(binaryStr.length);
+            for (let i = 0; i < binaryStr.length; i++) {
+                bytes[i] = binaryStr.charCodeAt(i);
+            }
+            return new TextDecoder('utf-8').decode(bytes);
+        } catch (error) {
+            this.onError(`Base64解码失败: ${error.message}`);
+            return '';
+        }
     }
 
     connectWebSocket() {
@@ -209,29 +223,46 @@ class XfVoiceDictation {
     }
 
     webSocketRes(resultData) {
-        let jsonData = JSON.parse(resultData);
-        let str = ""
-        if (jsonData.payload && jsonData.payload.result) {
-            let data = jsonData.payload.result;
-            let text = atob(data.text);
-            let ws = JSON.parse(text);
-            if (ws.ls === false) {
-                for (let index = 0; index < ws.ws.length; index++) {
-                    const element = ws.ws[index];
-                    str += element.cw[0].w
+        try {
+            let jsonData = JSON.parse(resultData);
+            let str = "";
+
+            // 处理正常返回结果
+            if (jsonData.payload?.result) {
+                try {
+                    const text = this.base64ToUtf8(jsonData.payload.result.text);
+                    const ws = JSON.parse(text);
+
+                    // 处理最终结果
+                    if (ws.ls === false) {
+                        str = ws.ws.map(element => element.cw[0].w).join('');
+                    }
+                    // 处理中间结果
+                    else if (ws.ls === true && ws.ws) {
+                        str = ws.ws.map(element => element.cw[0].w).join('');
+                        this.setResultText({ resultTextTemp: str });
+                    }
+
+                    if (str) {
+                        this.setResultText({ resultText: str });
+                    }
+                } catch (e) {
+                    this.onError(`解析语音结果失败: ${e.message}`);
                 }
             }
-            if (str !== "") {
-                this.setResultText({
-                    resultText: str
-                });
+
+            // 处理结束状态
+            if (jsonData.header?.code === 0 && jsonData.header?.status === 2) {
+                this.webSocket.close();
             }
-        }
-        if (jsonData.header.code === 0 && jsonData.header.status === 2) {
-            this.webSocket.close();
-        }
-        if (jsonData.header.code !== 0) {
-            this.webSocket.close();
+
+            // 处理错误状态
+            if (jsonData.header?.code !== 0) {
+                this.onError(`语音识别错误: ${jsonData.header?.message || '未知错误'}`);
+                this.webSocket.close();
+            }
+        } catch (error) {
+            this.onError(`处理WebSocket数据失败: ${error.message}`);
         }
     }
 

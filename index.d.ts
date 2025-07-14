@@ -1,5 +1,3 @@
-import { useEffect, useRef } from 'react';
-
 declare module 'xf-voice' {
   export interface XfVoiceOptions {
     APPID: string;
