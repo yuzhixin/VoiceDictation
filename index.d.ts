@@ -1,5 +1,7 @@
+import { useEffect, useRef } from 'react';
+
 declare module 'xf-voice' {
-  interface XfVoiceOptions {
+  export interface XfVoiceOptions {
     APPID: string;
     APIKey: string;
     APISecret: string;
@@ -26,4 +28,6 @@ declare module 'xf-voice' {
   }
 
   export default XfVoiceDictation;
+
+  export function useXfVoiceDictation(opts: XfVoiceOptions): React.MutableRefObject<XfVoiceDictation | null>;
 }
