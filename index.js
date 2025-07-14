@@ -12,7 +12,11 @@ class XfVoiceDictation {
         // 识别监听方法
         this.onTextChange = opts.onTextChange || Function();
         this.onWillStatusChange = opts.onWillStatusChange || Function();
-        this.onError = opts.onError || Function();
+        this.onError = opts.onError ? (error) => {
+            if (typeof opts.onError === 'function') {
+                setTimeout(() => opts.onError(error), 0);
+            }
+        } : Function();
 
         // 方言/语种
         this.status = 'null'

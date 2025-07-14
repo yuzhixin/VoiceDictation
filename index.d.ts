@@ -2,9 +2,13 @@ declare module 'xf-voice' {
   interface XfVoiceOptions {
     APPID: string;
     APIKey: string;
-    APIsecret: string;
+    APISecret: string;
     onTextChange?: (text: string) => void;
-    onError?:(error: string)=> void;
+    /**
+     * 错误回调函数(注意: 会被自动包装在setTimeout中调用以防止React重渲染)
+     * @param error 错误信息
+     */
+    onError?: (error: string) => void;
     onWillStatusChange?: (oldStatus: string, newStatus: string) => void;
     language?: string;
     accent?: string;
