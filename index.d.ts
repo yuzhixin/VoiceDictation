@@ -15,6 +15,7 @@ declare module 'xf-voice' {
     constructor(options: XfVoiceOptions);
     start(): void;
     stop(): void;
+    onError(): void;
     setStatus(status: string): void;
     setResultText(params: { resultText?: string, resultTextTemp?: string }): void;
     setParams(params: { language?: string, accent?: string }): void;
