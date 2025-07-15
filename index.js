@@ -33,6 +33,8 @@ class XfVoiceDictation {
         this.audioData = [];
         this.resultText = '';
         this.resultTextTemp = '';
+        this.textSegments = []; // 存储文本片段
+        this.currentSegment = {}; // 当前处理的片段
 
         this.init();
     }
@@ -80,7 +82,8 @@ class XfVoiceDictation {
     }
 
     setResultText({ resultText, resultTextTemp } = {}) {
-        this.onTextChange && this.onTextChange(resultTextTemp || resultText || '');
+        // 总是传递完整的resultText给onTextChange
+        this.onTextChange && this.onTextChange(resultText || this.resultText || '');
         resultText !== undefined && (this.resultText = resultText);
         resultTextTemp !== undefined && (this.resultTextTemp = resultTextTemp);
     }
@@ -209,23 +212,104 @@ class XfVoiceDictation {
     webSocketRes(resultData) {
         try {
             let jsonData = JSON.parse(resultData);
-            let str = '';
+
+            // 处理错误状态
+            if (jsonData.header?.code !== 0) {
+                this.onError(`语音识别错误: ${jsonData.header?.message || '未知错误'}`);
+                this.webSocket.close();
+                return;
+            }
 
             // 处理正常返回结果
             if (jsonData.payload?.result) {
                 try {
                     const text = this.base64ToUtf8(jsonData.payload.result.text);
-                    const ws = JSON.parse(text);
+                    const result = JSON.parse(text);
 
-                    // 处理最终结果
-                    if (ws.ls === false) {
-                        str = ws.ws.map((element) => element.cw[0].w).join('');
-                    }
-                    if (str) {
-                        this.setResultText({ resultText: str });
-                    }
-                    if (ws.ls === true) {
-                        this.setStatus('end');
+                    // 处理分片文本
+                    if (result.ws) {
+                        console.log(result)
+                        const currentText = result.ws.map((element) =>
+                            element.cw.map(cw => cw.w).join('')
+                        ).join('');
+                        console.log(currentText)
+
+                        // 更新当前片段
+                        this.currentSegment = {
+                            sn: result.sn,
+                            text: currentText,
+                            pgs: result.pgs,
+                            ls: result.ls
+                        };
+
+                        // 更新当前片段
+                        this.currentSegment = {
+                            sn: result.sn,
+                            text: currentText,
+                            pgs: result.pgs,
+                            ls: result.ls,
+                            timestamp: Date.now()
+                        };
+
+                        // 处理片段
+                        if (result.pgs === 'rpl') {
+                            // 替换模式：找到并移除所有同sn或更大的旧片段
+                            this.textSegments = this.textSegments.filter(s => s.sn < result.sn);
+
+                            // 重置resultText以完全替换
+                            this.resultText = '';
+                        } else {
+                            // 追加模式：移除所有sn大于当前sn的片段（防止重复）
+                            this.textSegments = this.textSegments.filter(s => s.sn < result.sn);
+                        }
+
+                        // 添加新片段
+                        this.textSegments.push(this.currentSegment);
+
+                        // 按sn排序
+                        this.textSegments.sort((a, b) => a.sn - b.sn);
+
+                        // 生成最终文本 - 只保留每个sn的最新版本
+                        const uniqueSegments = [];
+                        const seenSNs = new Set();
+
+                        // 从旧到新遍历，确保顺序正确
+                        for (const segment of this.textSegments) {
+                            if (!seenSNs.has(segment.sn)) {
+                                seenSNs.add(segment.sn);
+                                uniqueSegments.push(segment);
+                            }
+                        }
+
+                        // 生成最终文本
+                        let finalText = uniqueSegments.map(s => s.text).join('');
+
+                        // 特殊处理标点符号
+                        if (uniqueSegments.length > 0) {
+                            const lastSegment = uniqueSegments[uniqueSegments.length - 1];
+                            if (lastSegment.text.match(/^[,.!?。，！？、]/)) {
+                                finalText = uniqueSegments.slice(0, -1).map(s => s.text).join('') +
+                                    lastSegment.text;
+                            }
+                        }
+
+                        // 确保最终文本不超过最新片段的长度（防止重复）
+                        if (uniqueSegments.length > 0) {
+                            const lastSegment = uniqueSegments[uniqueSegments.length - 1];
+                            if (finalText.length > lastSegment.text.length * 2) {
+                                finalText = lastSegment.text;
+                            }
+                        }
+
+                        this.setResultText({
+                            resultText: finalText,
+                            resultTextTemp: currentText
+                        });
+
+                        // 根据状态处理
+                        if (jsonData.header.status === 2 || result.ls === true) { // 结束
+                            this.setStatus('end');
+                        }
                     }
                 } catch (e) {
                     this.onError(`解析语音结果失败: ${e.message}`);
@@ -233,13 +317,7 @@ class XfVoiceDictation {
             }
 
             // 处理结束状态
-            if (jsonData.header?.code === 0 && jsonData.header?.status === 2) {
-                this.webSocket.close();
-            }
-
-            // 处理错误状态
-            if (jsonData.header?.code !== 0) {
-                this.onError(`语音识别错误: ${jsonData.header?.message || '未知错误'}`);
+            if (jsonData.header?.status === 2) {
                 this.webSocket.close();
             }
         } catch (error) {
@@ -378,7 +456,7 @@ class XfVoiceDictation {
     start() {
         this.recorderStart();
         this.setResultText({ resultText: '', resultTextTemp: '' });
-        
+
         // 设置60秒倒计时，超时自动停止
         if (this.countdownTimer) {
             clearTimeout(this.countdownTimer);
