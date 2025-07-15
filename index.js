@@ -32,9 +32,7 @@ class XfVoiceDictation {
         this.streamRef = [];
         this.audioData = [];
         this.resultText = '';
-        this.resultTextTemp = '';
         this.textSegments = []; // 存储文本片段
-        this.currentSegment = {}; // 当前处理的片段
 
         this.init();
     }
@@ -81,11 +79,9 @@ class XfVoiceDictation {
         this.status = status;
     }
 
-    setResultText({ resultText, resultTextTemp } = {}) {
+    setResultText({ resultText } = {}) {
         // 总是传递完整的resultText给onTextChange
-        this.onTextChange && this.onTextChange(resultText || this.resultText || '');
-        resultText !== undefined && (this.resultText = resultText);
-        resultTextTemp !== undefined && (this.resultTextTemp = resultTextTemp);
+        this.onTextChange && this.onTextChange(resultText || '');
     }
 
     setParams({ language, accent } = {}) {
@@ -209,6 +205,36 @@ class XfVoiceDictation {
         }, 40);
     }
 
+    concatText(data) {
+        let result = '';
+        let currentSentence = '';
+        let lastRplText = '';
+
+        data.forEach((item) => {
+            if (item.pgs === 'apd') {
+                // 如果之前有 pending `rpl`，使用它
+                if (lastRplText) {
+                    result += lastRplText;
+                    lastRplText = ''; // 重置
+                } else {
+                    result += currentSentence; // 直接使用 `apd`
+                }
+                currentSentence = item.text; // 新句子开始
+            } else if (item.pgs === 'rpl') {
+                lastRplText = item.text; // 记录最新的 `rpl`，但不立即应用
+            }
+        });
+
+        // 处理最后可能剩余的 `rpl` 或 `apd`
+        if (lastRplText) {
+            result += lastRplText;
+        } else {
+            result += currentSentence;
+        }
+
+        return result;
+    }
+
     webSocketRes(resultData) {
         try {
             let jsonData = JSON.parse(resultData);
@@ -228,84 +254,14 @@ class XfVoiceDictation {
 
                     // 处理分片文本
                     if (result.ws) {
-                        console.log(result)
-                        const currentText = result.ws.map((element) =>
+                        const current = result.ws.map((element) =>
                             element.cw.map(cw => cw.w).join('')
                         ).join('');
-                        console.log(currentText)
-
-                        // 更新当前片段
-                        this.currentSegment = {
-                            sn: result.sn,
-                            text: currentText,
-                            pgs: result.pgs,
-                            ls: result.ls
-                        };
-
-                        // 更新当前片段
-                        this.currentSegment = {
-                            sn: result.sn,
-                            text: currentText,
-                            pgs: result.pgs,
-                            ls: result.ls,
-                            timestamp: Date.now()
-                        };
-
-                        // 处理片段
-                        if (result.pgs === 'rpl') {
-                            // 替换模式：找到并移除所有同sn或更大的旧片段
-                            this.textSegments = this.textSegments.filter(s => s.sn < result.sn);
-
-                            // 重置resultText以完全替换
-                            this.resultText = '';
-                        } else {
-                            // 追加模式：移除所有sn大于当前sn的片段（防止重复）
-                            this.textSegments = this.textSegments.filter(s => s.sn < result.sn);
-                        }
-
-                        // 添加新片段
-                        this.textSegments.push(this.currentSegment);
-
-                        // 按sn排序
-                        this.textSegments.sort((a, b) => a.sn - b.sn);
-
-                        // 生成最终文本 - 只保留每个sn的最新版本
-                        const uniqueSegments = [];
-                        const seenSNs = new Set();
-
-                        // 从旧到新遍历，确保顺序正确
-                        for (const segment of this.textSegments) {
-                            if (!seenSNs.has(segment.sn)) {
-                                seenSNs.add(segment.sn);
-                                uniqueSegments.push(segment);
-                            }
-                        }
-
-                        // 生成最终文本
-                        let finalText = uniqueSegments.map(s => s.text).join('');
-
-                        // 特殊处理标点符号
-                        if (uniqueSegments.length > 0) {
-                            const lastSegment = uniqueSegments[uniqueSegments.length - 1];
-                            if (lastSegment.text.match(/^[,.!?。，！？、]/)) {
-                                finalText = uniqueSegments.slice(0, -1).map(s => s.text).join('') +
-                                    lastSegment.text;
-                            }
-                        }
-
-                        // 确保最终文本不超过最新片段的长度（防止重复）
-                        if (uniqueSegments.length > 0) {
-                            const lastSegment = uniqueSegments[uniqueSegments.length - 1];
-                            if (finalText.length > lastSegment.text.length * 2) {
-                                finalText = lastSegment.text;
-                            }
-                        }
-
+                        this.textSegments.push({ pgs: result.pgs, text: current })
+                        const finalText = this.concatText(this.textSegments);
                         this.setResultText({
                             resultText: finalText,
-                            resultTextTemp: currentText
                         });
-
                         // 根据状态处理
                         if (jsonData.header.status === 2 || result.ls === true) { // 结束
                             this.setStatus('end');
@@ -455,8 +411,8 @@ class XfVoiceDictation {
 
     start() {
         this.recorderStart();
-        this.setResultText({ resultText: '', resultTextTemp: '' });
-
+        this.textSegments = [];
+        this.setResultText({ resultText: '' });
         // 设置60秒倒计时，超时自动停止
         if (this.countdownTimer) {
             clearTimeout(this.countdownTimer);
@@ -479,7 +435,6 @@ class XfVoiceDictation {
 
 export const useXfVoiceDictation = (opts) => {
     const voiceRef = useRef(null);
-
     useEffect(() => {
         voiceRef.current = new XfVoiceDictation(opts);
 
