@@ -378,9 +378,23 @@ class XfVoiceDictation {
     start() {
         this.recorderStart();
         this.setResultText({ resultText: '', resultTextTemp: '' });
+        
+        // 设置60秒倒计时，超时自动停止
+        if (this.countdownTimer) {
+            clearTimeout(this.countdownTimer);
+        }
+        this.countdownTimer = setTimeout(() => {
+            if (this.status === 'ing') {
+                this.recorderStop();
+            }
+        }, 60000);
     }
 
     stop() {
+        if (this.countdownTimer) {
+            clearTimeout(this.countdownTimer);
+            this.countdownTimer = null;
+        }
         this.recorderStop();
     }
 }
