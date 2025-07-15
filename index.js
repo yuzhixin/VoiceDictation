@@ -182,29 +182,6 @@ class XfVoiceDictation {
         this.webSocket.send(JSON.stringify(params));
         this.handlerInterval = setInterval(() => {
             if (this.audioData.length === 0) {
-                if (this.status === 'end') {
-                    this.webSocket.send(
-                        JSON.stringify({
-                            header: {
-                                app_id: this.APPID,
-                                status: 2,
-                            },
-                            payload: {
-                                audio: {
-                                    encoding: 'raw',
-                                    sample_rate: 16000,
-                                    channels: 1,
-                                    bit_depth: 16,
-                                    seq: 591,
-                                    status: 2,
-                                    audio: '',
-                                },
-                            },
-                        })
-                    );
-                    this.audioData = [];
-                    clearInterval(this.handlerInterval);
-                }
                 return false;
             }
             this.webSocket.send(
@@ -368,9 +345,31 @@ class XfVoiceDictation {
         if (!/Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent)) {
             this.audioContext && this.audioContext.suspend();
         }
-        this.setStatus('end');
         try {
-            this.streamRef.getTracks().forEach((track) => track.stop());
+            // 发送最终消息
+            if (this.webSocket && this.webSocket.readyState === 1) {
+                this.webSocket.send(
+                    JSON.stringify({
+                        header: {
+                            app_id: this.APPID,
+                            status: 2,
+                        },
+                        payload: {
+                            audio: {
+                                encoding: 'raw',
+                                sample_rate: 16000,
+                                channels: 1,
+                                bit_depth: 16,
+                                seq: 591,
+                                status: 2,
+                                audio: this.toBase64(audioData),
+                            },
+                        },
+                    })
+                );
+            }
+            this.audioData = [];
+            clearInterval(this.handlerInterval);
         } catch (error) {
             console.error('暂停失败!');
         }
