@@ -11,59 +11,31 @@ class XfVoiceDictation {
 
         this.onTextChange = opts.onTextChange || Function();
         this.onWillStatusChange = opts.onWillStatusChange || Function();
-        this.onError = opts.onError
-            ? (error) => {
-                if (typeof opts.onError === 'function') {
-                    setTimeout(() => opts.onError(error), 0);
-                }
-            }
+        this.onError = typeof opts.onError === 'function'
+            ? (error) => setTimeout(() => opts.onError(error), 0)
             : Function();
 
-        this.status = 'null';
         this.language = opts.language || 'zh_cn';
         this.accent = opts.accent || 'mandarin';
 
+        this.status = 'idle'; // 'idle' | 'ing' | 'end'
+        this.resetInternal();
+    }
+
+    resetInternal() {
+        this.webSocket = null;
+        this.webWorker = null;
+        this.audioContext = null;
+        this.scriptProcessor = null;
+        this.mediaSource = null;
         this.streamRef = null;
+
+        this.handlerInterval = null;
+        this.countdownTimer = null;
+
         this.audioData = [];
-        this.resultText = '';
         this.textSegments = [];
-
-        this.init();
-    }
-
-    getWebSocketUrl() {
-        return new Promise((resolve, reject) => {
-            const { url, host, APISecret, APIKey } = this;
-            try {
-                const date = new Date().toGMTString();
-                const algorithm = 'hmac-sha256';
-                const headers = 'host date request-line';
-                const signatureOrigin = `host: ${host}\ndate: ${date}\nGET /v1 HTTP/1.1`;
-                const signatureSha = CryptoJS.HmacSHA256(signatureOrigin, APISecret);
-                const signature = CryptoJS.enc.Base64.stringify(signatureSha);
-                const authorizationOrigin = `api_key="${APIKey}", algorithm="${algorithm}", headers="${headers}", signature="${signature}"`;
-                const encoder = new TextEncoder();
-                const authorization = btoa(String.fromCharCode.apply(null, encoder.encode(authorizationOrigin)));
-                resolve(`${url}?authorization=${authorization}&date=${date}&host=${host}`);
-            } catch (error) {
-                reject(error);
-            }
-        });
-    }
-
-    init() {
-        if (!this.APPID || !this.APIKey || !this.APISecret) {
-            this.onError('请正确配置【迅飞语音听写（流式版）WebAPI】服务接口认证信息！');
-            return;
-        }
-        try {
-            this.webWorker = new Worker(new URL('./transcode.worker.js', import.meta.url));
-            this.webWorker.onmessage = (event) => {
-                this.audioData.push(...event.data);
-            };
-        } catch (error) {
-            this.onError('对不起：请在服务器环境下运行！');
-        }
+        this.resultText = '';
     }
 
     setStatus(status) {
@@ -74,12 +46,8 @@ class XfVoiceDictation {
     }
 
     setResultText({ resultText } = {}) {
-        this.onTextChange(resultText || '');
-    }
-
-    setParams({ language, accent } = {}) {
-        language && (this.language = language);
-        accent && (this.accent = accent);
+        this.resultText = resultText || '';
+        this.onTextChange(this.resultText);
     }
 
     toBase64(buffer) {
@@ -105,31 +73,152 @@ class XfVoiceDictation {
         }
     }
 
-    connectWebSocket() {
-        return this.getWebSocketUrl().then((url) => {
-            let iatWS = 'WebSocket' in window ? new WebSocket(url) :
-                'MozWebSocket' in window ? new MozWebSocket(url) : null;
-
-            if (!iatWS) {
-                this.onError('浏览器不支持WebSocket!');
-                return;
+    getWebSocketUrl() {
+        return new Promise((resolve, reject) => {
+            try {
+                const date = new Date().toGMTString();
+                const signatureOrigin = `host: ${this.host}\ndate: ${date}\nGET /v1 HTTP/1.1`;
+                const signatureSha = CryptoJS.HmacSHA256(signatureOrigin, this.APISecret);
+                const signature = CryptoJS.enc.Base64.stringify(signatureSha);
+                const authorizationOrigin = `api_key="${this.APIKey}", algorithm="hmac-sha256", headers="host date request-line", signature="${signature}"`;
+                const encoder = new TextEncoder();
+                const authorization = btoa(String.fromCharCode(...encoder.encode(authorizationOrigin)));
+                resolve(`${this.url}?authorization=${authorization}&date=${date}&host=${this.host}`);
+            } catch (error) {
+                reject(error);
             }
-
-            this.webSocket = iatWS;
-            this.setStatus('init');
-
-            iatWS.onopen = () => {
-                this.setStatus('ing');
-                setTimeout(() => this.webSocketSend(), 500);
-            };
-            iatWS.onmessage = (e) => this.webSocketRes(e.data);
-            iatWS.onerror = () => this.recorderStop();
-            iatWS.onclose = () => this.recorderStop();
         });
     }
 
+    async start() {
+        this.stop(); // 停止旧的并清理资源
+
+        if (!this.APPID || !this.APIKey || !this.APISecret) {
+            this.onError('请正确配置【迅飞语音听写 WebAPI】服务接口认证信息！');
+            return;
+        }
+
+        this.resetInternal();
+        this.setStatus('idle');
+        this.setResultText({ resultText: '' });
+
+        try {
+            // 初始化 worker
+            this.webWorker = new Worker(new URL('./transcode.worker.js', import.meta.url));
+            this.webWorker.onmessage = (event) => {
+                this.audioData.push(...event.data);
+            };
+
+            // 初始化音频
+            this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            await this.audioContext.resume();
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            this.streamRef = stream;
+
+            this.scriptProcessor = this.audioContext.createScriptProcessor(0, 1, 1);
+            this.scriptProcessor.onaudioprocess = (e) => {
+                if (this.status === 'ing') {
+                    this.webWorker.postMessage(e.inputBuffer.getChannelData(0));
+                }
+            };
+
+            this.mediaSource = this.audioContext.createMediaStreamSource(stream);
+            this.mediaSource.connect(this.scriptProcessor);
+            this.scriptProcessor.connect(this.audioContext.destination);
+
+            await this.connectWebSocket();
+
+            this.countdownTimer = setTimeout(() => {
+                if (this.status === 'ing') {
+                    this.stop();
+                }
+            }, 60000);
+        } catch (error) {
+            this.onError(`启动失败: ${error.message}`);
+            this.stop();
+        }
+    }
+
+    stop() {
+        if (this.status === 'ing' && this.webSocket?.readyState === 1) {
+            try {
+                this.webSocket.send(JSON.stringify({
+                    header: { app_id: this.APPID, status: 2 },
+                    payload: {
+                        audio: {
+                            encoding: 'raw',
+                            sample_rate: 16000,
+                            channels: 1,
+                            bit_depth: 16,
+                            seq: 999,
+                            status: 2,
+                            audio: this.toBase64(this.audioData),
+                        },
+                    },
+                }));
+            } catch (e) {
+                console.warn('发送最终包失败:', e);
+            }
+        }
+        this.destroy();
+    }
+
+    destroy() {
+        this.setStatus('end');
+
+        this.webSocket?.close();
+        this.webSocket = null;
+
+        this.webWorker?.terminate();
+        this.webWorker = null;
+
+        this.streamRef?.getTracks?.().forEach(track => track.stop());
+        this.streamRef = null;
+
+        clearInterval(this.handlerInterval);
+        clearTimeout(this.countdownTimer);
+        this.handlerInterval = null;
+        this.countdownTimer = null;
+
+        this.scriptProcessor?.disconnect();
+        this.mediaSource?.disconnect();
+        this.scriptProcessor = null;
+        this.mediaSource = null;
+
+        this.audioContext?.close();
+        this.audioContext = null;
+
+        this.audioData = [];
+        this.textSegments = [];
+        this.resultText = '';
+    }
+
+    async connectWebSocket() {
+        const url = await this.getWebSocketUrl();
+
+        const iatWS = 'WebSocket' in window ? new WebSocket(url) :
+            'MozWebSocket' in window ? new MozWebSocket(url) : null;
+
+        if (!iatWS) {
+            this.onError('浏览器不支持WebSocket!');
+            return;
+        }
+
+        this.webSocket = iatWS;
+        this.setStatus('init');
+
+        iatWS.onopen = () => {
+            this.setStatus('ing');
+            setTimeout(() => this.webSocketSend(), 500);
+        };
+
+        iatWS.onmessage = (e) => this.webSocketRes(e.data);
+        iatWS.onerror = () => this.stop();
+        iatWS.onclose = () => this.stop();
+    }
+
     webSocketSend() {
-        if (this.webSocket.readyState !== 1) return;
+        if (this.webSocket.readyState !== 1 || this.status === "end") return;
 
         const params = {
             header: {
@@ -233,128 +322,18 @@ class XfVoiceDictation {
             this.onError(`处理WebSocket数据失败: ${error.message}`);
         }
     }
-
-    recorderInit() {
-        try {
-            this.audioContext = this.audioContext || new (window.AudioContext || window.webkitAudioContext)();
-            this.audioContext.resume();
-        } catch {
-            this.onError('浏览器不支持webAudioApi相关接口');
-            return;
-        }
-
-        const getMediaSuccess = (stream) => {
-            this.streamRef = stream;
-            this.scriptProcessor = this.audioContext.createScriptProcessor(0, 1, 1);
-            this.scriptProcessor.onaudioprocess = (e) => {
-                if (this.status === 'ing') {
-                    this.webWorker.postMessage(e.inputBuffer.getChannelData(0));
-                }
-            };
-            this.mediaSource = this.audioContext.createMediaStreamSource(stream);
-            this.mediaSource.connect(this.scriptProcessor);
-            this.scriptProcessor.connect(this.audioContext.destination);
-            this.connectWebSocket();
-        };
-
-        const getMediaFail = () => {
-            this.onError('录音权限获取失败!');
-            this.audioContext?.close();
-            this.audioContext = null;
-            this.webSocket?.close();
-        };
-
-        navigator.mediaDevices?.getUserMedia({ audio: true })
-            .then(getMediaSuccess)
-            .catch(getMediaFail);
-    }
-
-    recorderStart() {
-        if (!this.audioContext) {
-            this.recorderInit();
-        } else {
-            this.audioContext.resume();
-            this.connectWebSocket();
-        }
-    }
-
-    recorderStop() {
-        try {
-            if (this.status === 'ing' && this.webSocket?.readyState === 1) {
-                this.webSocket.send(JSON.stringify({
-                    header: { app_id: this.APPID, status: 2 },
-                    payload: {
-                        audio: {
-                            encoding: 'raw',
-                            sample_rate: 16000,
-                            channels: 1,
-                            bit_depth: 16,
-                            seq: 591,
-                            status: 2,
-                            audio: this.toBase64(this.audioData),
-                        },
-                    },
-                }));
-            }
-        } catch (error) {
-            console.error('发送终止包失败!', error);
-        }
-        this.setStatus('end');
-        this.destroy(); // ✅ 统一清理
-    }
-
-    destroy() {
-        if (this.streamRef?.getTracks) {
-            this.streamRef.getTracks().forEach((track) => track.stop());
-            this.streamRef = null;
-        }
-        clearInterval(this.handlerInterval);
-        clearTimeout(this.countdownTimer);
-        this.handlerInterval = null;
-        this.countdownTimer = null;
-
-        this.scriptProcessor?.disconnect();
-        this.mediaSource?.disconnect();
-        this.scriptProcessor = null;
-        this.mediaSource = null;
-
-        this.audioContext?.close();
-        this.audioContext = null;
-
-        this.webWorker?.terminate();
-        this.webWorker = null;
-
-        this.audioData = [];
-        this.textSegments = [];
-        this.resultText = '';
-    }
-
-    start() {
-        this.recorderStart();
-        this.textSegments = [];
-        this.setResultText({ resultText: '' });
-        clearTimeout(this.countdownTimer);
-        this.countdownTimer = setTimeout(() => {
-            if (this.status === 'ing') {
-                this.recorderStop();
-            }
-        }, 60000);
-    }
-
-    stop() {
-        this.recorderStop();
-    }
 }
 
 export const useXfVoiceDictation = (opts) => {
     const voiceRef = useRef(null);
+
     useEffect(() => {
         voiceRef.current = new XfVoiceDictation(opts);
         return () => {
             voiceRef.current?.stop();
-            voiceRef.current?.destroy();
         };
     }, [opts]);
+
     return voiceRef;
 };
 
