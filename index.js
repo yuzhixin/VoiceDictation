@@ -321,9 +321,6 @@ class XfVoiceDictation {
         this.audioContext?.close();
         this.audioContext = null;
 
-        this.webSocket?.close();
-        this.webSocket = null;
-
         this.webWorker?.terminate();
         this.webWorker = null;
 
