@@ -20,20 +20,10 @@ class XfVoiceDictation {
 
         this.status = 'idle'; // 'idle' | 'ing' | 'end'
         this.resetInternal();
-        this.record = false;
     }
 
     resetInternal() {
-        this.webSocket = null;
-        this.webWorker = null;
-        this.audioContext = null;
-        this.scriptProcessor = null;
-        this.mediaSource = null;
-        this.streamRef = null;
-
-        this.handlerInterval = null;
-        this.countdownTimer = null;
-
+        // 只重置内部状态，不处理资源释放
         this.audioData = [];
         this.textSegments = [];
         this.resultText = '';
@@ -51,27 +41,36 @@ class XfVoiceDictation {
         this.onTextChange(this.resultText);
     }
 
-    toBase64(buffer) {
-        let binary = '';
-        let bytes = new Uint8Array(buffer);
-        for (let i = 0; i < bytes.byteLength; i++) {
-            binary += String.fromCharCode(bytes[i]);
+    // 音频数据处理工具方法
+    _processAudioData(buffer, encode = true) {
+        if (encode) {
+            let binary = '';
+            let bytes = new Uint8Array(buffer);
+            for (let i = 0; i < bytes.byteLength; i++) {
+                binary += String.fromCharCode(bytes[i]);
+            }
+            return window.btoa(binary);
+        } else {
+            try {
+                const binaryStr = atob(buffer);
+                const bytes = new Uint8Array(binaryStr.length);
+                for (let i = 0; i < binaryStr.length; i++) {
+                    bytes[i] = binaryStr.charCodeAt(i);
+                }
+                return new TextDecoder('utf-8').decode(bytes);
+            } catch (error) {
+                this.onError(`Base64解码失败: ${error.message}`);
+                return '';
+            }
         }
-        return window.btoa(binary);
+    }
+
+    toBase64(buffer) {
+        return this._processAudioData(buffer, true);
     }
 
     base64ToUtf8(base64Str) {
-        try {
-            const binaryStr = atob(base64Str);
-            const bytes = new Uint8Array(binaryStr.length);
-            for (let i = 0; i < binaryStr.length; i++) {
-                bytes[i] = binaryStr.charCodeAt(i);
-            }
-            return new TextDecoder('utf-8').decode(bytes);
-        } catch (error) {
-            this.onError(`Base64解码失败: ${error.message}`);
-            return '';
-        }
+        return this._processAudioData(base64Str, false);
     }
 
     getWebSocketUrl() {
@@ -93,7 +92,6 @@ class XfVoiceDictation {
 
     async start() {
         this.stop(); // 停止旧的并清理资源
-        this.record = true;
         if (!this.APPID || !this.APIKey || !this.APISecret) {
             this.onError('请正确配置【迅飞语音听写 WebAPI】服务接口认证信息！');
             return;
@@ -143,56 +141,38 @@ class XfVoiceDictation {
     stop() {
         if (this.status === 'ing' && this.webSocket?.readyState === 1) {
             try {
-                this.webSocket.send(JSON.stringify({
-                    header: { app_id: this.APPID, status: 2 },
-                    payload: {
-                        audio: {
-                            encoding: 'raw',
-                            sample_rate: 16000,
-                            channels: 1,
-                            bit_depth: 16,
-                            seq: 999,
-                            status: 2,
-                            audio: this.toBase64(this.audioData),
-                        },
-                    },
-                }));
+                this._sendWebSocketMessage(2, 999, this.audioData);
             } catch (e) {
                 console.warn('发送最终包失败:', e);
             }
         }
         this.destroy();
-        this.record = false;
     }
 
     destroy() {
         this.setStatus('end');
 
+        // 释放所有资源
         this.webSocket?.close();
-        this.webSocket = null;
-
         this.webWorker?.terminate();
-        this.webWorker = null;
-
         this.streamRef?.getTracks?.().forEach(track => track.stop());
-        this.streamRef = null;
-
         clearInterval(this.handlerInterval);
         clearTimeout(this.countdownTimer);
-        this.handlerInterval = null;
-        this.countdownTimer = null;
-
         this.scriptProcessor?.disconnect();
         this.mediaSource?.disconnect();
+        this.audioContext?.close();
+
+        // 重置所有引用和状态
+        this.webSocket = null;
+        this.webWorker = null;
+        this.streamRef = null;
+        this.handlerInterval = null;
+        this.countdownTimer = null;
         this.scriptProcessor = null;
         this.mediaSource = null;
-
-        this.audioContext?.close();
         this.audioContext = null;
 
-        this.audioData = [];
-        this.textSegments = [];
-        this.resultText = '';
+        this.resetInternal(); // 重置内部状态
     }
 
     async connectWebSocket() {
@@ -212,9 +192,7 @@ class XfVoiceDictation {
         iatWS.onopen = () => {
             this.setStatus('ing');
             setTimeout(() => {
-                if (this.record) {
-                    this.webSocketSend()
-                }
+                this.webSocketSend()
             }, 500);
         };
 
@@ -223,15 +201,23 @@ class XfVoiceDictation {
         iatWS.onclose = () => this.stop();
     }
 
-    webSocketSend() {
-        if (this.webSocket.readyState !== 1 || this.status === "end") return;
-
+    _sendWebSocketMessage(status, seq, audioData) {
         const params = {
-            header: {
-                app_id: this.APPID,
-                status: 0,
+            header: { app_id: this.APPID, status },
+            payload: {
+                audio: {
+                    encoding: 'raw',
+                    sample_rate: 16000,
+                    channels: 1,
+                    bit_depth: 16,
+                    seq,
+                    status,
+                    audio: this.toBase64(audioData),
+                },
             },
-            parameter: {
+        };
+        if (status === 0) {
+            params.parameter = {
                 iat: {
                     domain: 'slm',
                     language: this.language,
@@ -245,38 +231,22 @@ class XfVoiceDictation {
                         format: 'json',
                     },
                 },
-            },
-            payload: {
-                audio: {
-                    encoding: 'raw',
-                    sample_rate: 16000,
-                    channels: 1,
-                    bit_depth: 16,
-                    seq: 1,
-                    status: 0,
-                    audio: this.toBase64(this.audioData.splice(0, 1280)),
-                },
-            },
-        };
-        this.webSocket.send(JSON.stringify(params));
+            };
+        }
+        return JSON.stringify(params);
+    }
+
+    webSocketSend() {
+        if (this.webSocket.readyState !== 1 || this.status === "end") return;
+
+        this.webSocket.send(
+            this._sendWebSocketMessage(0, 1, this.audioData.splice(0, 1280))
+        );
 
         this.handlerInterval = setInterval(() => {
             if (this.audioData.length === 0) return;
             this.webSocket.send(
-                JSON.stringify({
-                    header: { app_id: this.APPID, status: 1 },
-                    payload: {
-                        audio: {
-                            encoding: 'raw',
-                            sample_rate: 16000,
-                            channels: 1,
-                            bit_depth: 16,
-                            seq: 2,
-                            status: 1,
-                            audio: this.toBase64(this.audioData.splice(0, 1280)),
-                        },
-                    },
-                })
+                this._sendWebSocketMessage(1, 2, this.audioData.splice(0, 1280))
             );
         }, 40);
     }
