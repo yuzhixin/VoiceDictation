@@ -116,7 +116,6 @@ export default class IatRecorder {
     setStatus(status) {
         this.onWillStatusChange && this.status !== status && this.onWillStatusChange(this.status, status);
         this.status = status;
-        console.log(this.status, "stop1111111111")
     };
     // 设置识别结果内容
     setResultText({ resultText, resultTextTemp } = {}) {
@@ -264,7 +263,6 @@ export default class IatRecorder {
     };
     // 向webSocket发送数据(音频二进制数据经过Base64处理)
     webSocketSend() {
-        console.log("status", this.status)
         if (!this.webSocket || this.webSocket.readyState !== 1) return false;
         // 音频数据
         const audioData = this.audioData.splice(0, 1280);
@@ -309,9 +307,8 @@ export default class IatRecorder {
                 clearInterval(this.handlerInterval);
                 return false;
             };
-            console.log(22222222222222, this.status, this.audioData.length)
+            console.log(this.status, this.audioData.length)
             if (this.audioData.length === 0) {
-                console.log(2222222222)
                 if (this.status === 'end') {
                     this.webSocket.send(JSON.stringify({
                         header: { app_id: this.APPID, status: 2 },
@@ -399,6 +396,7 @@ export default class IatRecorder {
         }
         this.setStatus('end');
         this.audioData = [];
+        clearInterval(this.handlerInterval);
     };
     // 开始
     start() {
