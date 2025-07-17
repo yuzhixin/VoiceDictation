@@ -165,7 +165,14 @@ export default class IatRecorder {
                 this.recorderStop(e);
             };
             iatWS.onclose = e => {
-                this.recorderStop(e);
+                this.setStatus('end');
+                try {
+                    this.streamRef && this.streamRef.getTracks().forEach(track => track.stop());
+                } catch (e) {
+                    console.error('Error stopping media stream:', e);
+                }
+                clearInterval(this.handlerInterval); // 确保 interval 被清除
+                console.log('WebSocket 连接已关闭');
             };
         })
     };
@@ -301,44 +308,20 @@ export default class IatRecorder {
         // 发送数据
         this.webSocket.send(JSON.stringify(params));
         this.handlerInterval = setInterval(() => {
-            // websocket未连接
-            if (!this.webSocket || this.webSocket.readyState !== 1) {
-                this.audioData = [];
+            // websocket断开或状态不是ing时，直接清除定时器
+            if (!this.webSocket || this.webSocket.readyState !== 1 || this.status !== 'ing') {
                 clearInterval(this.handlerInterval);
-                return false;
+                this.handlerInterval = null;
+                return;
             };
-            console.log(this.status, this.audioData.length)
-            if (this.audioData.length === 0) {
-                if (this.status === 'end') {
-                    this.webSocket.send(JSON.stringify({
-                        header: { app_id: this.APPID, status: 2 },
-                        payload: {
-                            audio: {
-                                encoding: 'raw',
-                                sample_rate: 16000,
-                                channels: 1,
-                                bit_depth: 16,
-                                seq: 999,
-                                status: 2,
-                                audio: "",
-                            },
-                        },
-                    }));
-                    clearInterval(this.handlerInterval);
-                }
-                return false;
-            };
-            // 中间帧
+            // 发送中间帧
             this.webSocket.send(
                 JSON.stringify({
                     header: { app_id: this.APPID, status: 1 },
+                    // ... payload for intermediate frame
                     payload: {
                         audio: {
-                            encoding: 'raw',
-                            sample_rate: 16000,
-                            channels: 1,
-                            bit_depth: 16,
-                            seq: 2,
+                            // ...
                             status: 1,
                             audio: this.toBase64(this.audioData.splice(0, 1280)),
                         },
@@ -381,6 +364,7 @@ export default class IatRecorder {
     };
     // 启动录音
     recorderStart() {
+        this.setStatus("ing")
         if (!this.audioContext) {
             this.recorderInit();
         } else {
@@ -389,14 +373,44 @@ export default class IatRecorder {
         }
     };
     // 停止录音
+    // 停止录音
     recorderStop() {
+        console.log(this.status)
+        // 如果状态已经是 end 或 closed，则不重复执行
+        // if (this.status !== 'ing') {
+        //     return;
+        // }
+
+        console.log("主动停止录音...");
+        this.setStatus('end');
+
+        // 1. 立即清除 interval，防止再发送中间帧
+        clearInterval(this.handlerInterval);
+        this.handlerInterval = null;
+
+        // 2. 立即发送结束帧 (status: 2)
+        console.log(1111111111111111111111111)
+        this.webSocket.send(JSON.stringify({
+            header: { app_id: this.APPID, status: 2 },
+            payload: {
+                audio: {
+                    encoding: 'raw',
+                    sample_rate: 16000,
+                    channels: 1,
+                    bit_depth: 16,
+                    seq: 999, // use a final sequence number
+                    status: 2,
+                    audio: "",
+                },
+            },
+        }));
+        console.log(222222222222222222)
+
+        // 3. 暂停音频上下文和清理数据
         if (!(/Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent))) {
-            // safari下suspend后再次resume录音内容将是空白，设置safari下不做suspend
             this.audioContext && this.audioContext.suspend();
         }
-        this.setStatus('end');
         this.audioData = [];
-        clearInterval(this.handlerInterval);
     };
     // 开始
     start() {
