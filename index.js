@@ -309,7 +309,7 @@ export default class IatRecorder {
                 clearInterval(this.handlerInterval);
                 return false;
             };
-            console.log(22222222222222, this.status)
+            console.log(22222222222222, this.status, this.audioData.length)
             if (this.audioData.length === 0) {
                 console.log(2222222222)
                 if (this.status === 'end') {
@@ -327,7 +327,6 @@ export default class IatRecorder {
                             },
                         },
                     }));
-                    this.audioData = [];
                     clearInterval(this.handlerInterval);
                 }
                 return false;
@@ -399,6 +398,7 @@ export default class IatRecorder {
             this.audioContext && this.audioContext.suspend();
         }
         this.setStatus('end');
+        this.audioData = [];
     };
     // 开始
     start() {
