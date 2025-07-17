@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import CryptoJS from 'crypto-js';
 
 class XfVoiceDictation {
@@ -11,7 +11,6 @@ class XfVoiceDictation {
 
         this.onTextChange = opts.onTextChange || Function();
         this.onWillStatusChange = opts.onWillStatusChange || Function();
-        this.onRecordStatusChange = opts.onRecordStatusChange || Function();
         this.onError = typeof opts.onError === 'function'
             ? (error) => setTimeout(() => opts.onError(error), 0)
             : Function();
@@ -93,7 +92,6 @@ class XfVoiceDictation {
 
     async start() {
         this.stop(); // 停止旧的并清理资源
-        this.onRecordStatusChange('started');
 
         if (!this.APPID || !this.APIKey || !this.APISecret) {
             this.onError('请正确配置【迅飞语音听写 WebAPI】服务接口认证信息！');
@@ -142,7 +140,6 @@ class XfVoiceDictation {
     }
 
     stop() {
-        this.onRecordStatusChange('stopped');
         if (this.status === 'ing' && this.webSocket?.readyState === 1) {
             try {
                 this.webSocket.send(JSON.stringify({
@@ -221,7 +218,7 @@ class XfVoiceDictation {
     }
 
     webSocketSend() {
-        if (this.webSocket.readyState !== 1 || this.status === "end" || this.recordStatus === 'stopped') return;
+        if (this.webSocket.readyState !== 1 || this.status === "end") return;
 
         const params = {
             header: {
@@ -257,9 +254,9 @@ class XfVoiceDictation {
         };
         this.webSocket.send(JSON.stringify(params));
 
-            this.handlerInterval = setInterval(() => {
-                if (this.audioData.length === 0 || this.recordStatus === 'stopped') return;
-                this.webSocket.send(
+        this.handlerInterval = setInterval(() => {
+            if (this.audioData.length === 0) return;
+            this.webSocket.send(
                 JSON.stringify({
                     header: { app_id: this.APPID, status: 1 },
                     payload: {
@@ -329,32 +326,15 @@ class XfVoiceDictation {
 
 export const useXfVoiceDictation = (opts) => {
     const voiceRef = useRef(null);
-    const [recordStatus, setRecordStatus] = useState('stopped');
 
     useEffect(() => {
-        const instance = new XfVoiceDictation({
-            ...opts,
-            onRecordStatusChange: (status) => {
-                setRecordStatus(status);
-            },
-            onWillStatusChange: (oldStatus, newStatus) => {
-                opts.onWillStatusChange?.(oldStatus, newStatus);
-            },
-            onTextChange: (text) => {
-                opts.onTextChange?.(text);
-            },
-            onError: (error) => {
-                opts.onError?.(error);
-            }
-        });
-
-        voiceRef.current = instance;
+        voiceRef.current = new XfVoiceDictation(opts);
         return () => {
             voiceRef.current?.stop();
         };
     }, [opts]);
 
-    return { voiceRef, recordStatus };
+    return voiceRef;
 };
 
 export default XfVoiceDictation;
