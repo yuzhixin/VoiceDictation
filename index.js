@@ -114,16 +114,20 @@ class XfVoiceDictation {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             this.streamRef = stream;
 
-            this.scriptProcessor = this.audioContext.createScriptProcessor(0, 1, 1);
-            this.scriptProcessor.onaudioprocess = (e) => {
+            // 注册并加载AudioWorklet
+            const processorUrl = new URL('./audio-processor.js', import.meta.url);
+            await this.audioContext.audioWorklet.addModule(processorUrl);
+            this.audioWorkletNode = new AudioWorkletNode(this.audioContext, 'audio-processor');
+
+            this.audioWorkletNode.port.onmessage = (e) => {
                 if (this.status === 'ing') {
-                    this.webWorker.postMessage(e.inputBuffer.getChannelData(0));
+                    this.webWorker.postMessage(e.data);
                 }
             };
 
             this.mediaSource = this.audioContext.createMediaStreamSource(stream);
-            this.mediaSource.connect(this.scriptProcessor);
-            this.scriptProcessor.connect(this.audioContext.destination);
+            this.mediaSource.connect(this.audioWorkletNode);
+            this.audioWorkletNode.connect(this.audioContext.destination);
 
             await this.connectWebSocket();
 
@@ -159,6 +163,7 @@ class XfVoiceDictation {
         clearInterval(this.handlerInterval);
         clearTimeout(this.countdownTimer);
         this.scriptProcessor?.disconnect();
+        this.audioWorkletNode?.disconnect();
         this.mediaSource?.disconnect();
         this.audioContext?.close();
 
@@ -169,6 +174,7 @@ class XfVoiceDictation {
         this.handlerInterval = null;
         this.countdownTimer = null;
         this.scriptProcessor = null;
+        this.audioWorkletNode = null;
         this.mediaSource = null;
         this.audioContext = null;
 
@@ -185,12 +191,8 @@ class XfVoiceDictation {
             this.onError('浏览器不支持WebSocket!');
             return;
         }
-
         this.webSocket = iatWS;
-        this.setStatus('init');
-
         iatWS.onopen = () => {
-            this.setStatus('ing');
             setTimeout(() => {
                 this.webSocketSend()
             }, 500);
@@ -239,16 +241,24 @@ class XfVoiceDictation {
     webSocketSend() {
         if (this.webSocket.readyState !== 1 || this.status === "end") return;
 
-        this.webSocket.send(
-            this._sendWebSocketMessage(0, 1, this.audioData.splice(0, 1280))
-        );
-
-        this.handlerInterval = setInterval(() => {
-            if (this.audioData.length === 0) return;
+        // 发送初始包
+        if (this.status === "idle") {
             this.webSocket.send(
-                this._sendWebSocketMessage(1, 2, this.audioData.splice(0, 1280))
+                this._sendWebSocketMessage(0, 1, this.audioData.splice(0, 1280))
             );
-        }, 40);
+            this.setStatus("ing");
+        }
+
+        // 设置40ms定时器持续发送
+        if (!this.handlerInterval) {
+            this.handlerInterval = setInterval(() => {
+                if (this.audioData.length > 0 && this.status === "ing") {
+                    this.webSocket.send(
+                        this._sendWebSocketMessage(1, 2, this.audioData.splice(0, 1280))
+                    );
+                }
+            }, 40);
+        }
     }
 
     concatText(data) {
@@ -284,10 +294,6 @@ class XfVoiceDictation {
                     this.textSegments.push({ pgs: result.pgs, text: current });
                     const finalText = this.concatText(this.textSegments);
                     this.setResultText({ resultText: finalText });
-
-                    if (jsonData.header.status === 2 || result.ls === true) {
-                        this.setStatus('end');
-                    }
                 }
             }
 
