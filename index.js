@@ -221,7 +221,7 @@ class XfVoiceDictation {
     }
 
     webSocketSend() {
-        if (this.webSocket.readyState !== 1 || this.status === "end") return;
+        if (this.webSocket.readyState !== 1 || this.status === "end" || this.recordStatus === 'stopped') return;
 
         const params = {
             header: {
@@ -257,9 +257,9 @@ class XfVoiceDictation {
         };
         this.webSocket.send(JSON.stringify(params));
 
-        this.handlerInterval = setInterval(() => {
-            if (this.audioData.length === 0) return;
-            this.webSocket.send(
+            this.handlerInterval = setInterval(() => {
+                if (this.audioData.length === 0 || this.recordStatus === 'stopped') return;
+                this.webSocket.send(
                 JSON.stringify({
                     header: { app_id: this.APPID, status: 1 },
                     payload: {
