@@ -31,6 +31,7 @@ export default class IatRecorder {
         this.resultTextTemp = '';
         // 音频数据多线程
         this.init();
+        this.textSegments = [];
     };
 
     // 获取webSocket请求地址鉴权
@@ -115,6 +116,7 @@ export default class IatRecorder {
     setStatus(status) {
         this.onWillStatusChange && this.status !== status && this.onWillStatusChange(this.status, status);
         this.status = status;
+        console.log(this.status, "stop1111111111")
     };
     // 设置识别结果内容
     setResultText({ resultText, resultTextTemp } = {}) {
@@ -168,6 +170,21 @@ export default class IatRecorder {
             };
         })
     };
+
+    base64ToUtf8(base64Str) {
+        try {
+            const binaryStr = atob(base64Str);
+            const bytes = new Uint8Array(binaryStr.length);
+            for (let i = 0; i < binaryStr.length; i++) {
+                bytes[i] = binaryStr.charCodeAt(i);
+            }
+            return new TextDecoder('utf-8').decode(bytes);
+        } catch (error) {
+            this.onError(`Base64解码失败: ${error.message}`);
+            return '';
+        }
+    }
+
     // 初始化浏览器录音
     recorderInit() {
         // 创建音频环境
@@ -247,6 +264,7 @@ export default class IatRecorder {
     };
     // 向webSocket发送数据(音频二进制数据经过Base64处理)
     webSocketSend() {
+        console.log("status", this.status)
         if (!this.webSocket || this.webSocket.readyState !== 1) return false;
         // 音频数据
         const audioData = this.audioData.splice(0, 1280);
@@ -291,9 +309,10 @@ export default class IatRecorder {
                 clearInterval(this.handlerInterval);
                 return false;
             };
+            console.log(22222222222222, this.status)
             if (this.audioData.length === 0) {
+                console.log(2222222222)
                 if (this.status === 'end') {
-
                     this.webSocket.send(JSON.stringify({
                         header: { app_id: this.APPID, status: 2 },
                         payload: {
@@ -332,6 +351,21 @@ export default class IatRecorder {
             );
         }, 40);
     };
+
+    concatText(data) {
+        let result = '', currentSentence = '', lastRplText = '';
+        data.forEach((item) => {
+            if (item.pgs === 'apd') {
+                result += lastRplText || currentSentence;
+                currentSentence = item.text;
+                lastRplText = '';
+            } else if (item.pgs === 'rpl') {
+                lastRplText = item.text;
+            }
+        });
+        return result + (lastRplText || currentSentence);
+    }
+
     // 识别结束 webSocket返回数据
     webSocketRes(resultData) {
         const jsonData = JSON.parse(resultData);
