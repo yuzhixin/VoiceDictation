@@ -1,31 +1,47 @@
-declare module 'xf-voice' {
-  export interface XfVoiceOptions {
-    APPID: string;
-    APIKey: string;
-    APISecret: string;
-    onTextChange?: (text: string) => void;
-    /**
-     * 错误回调函数(注意: 会被自动包装在setTimeout中调用以防止React重渲染)
-     * @param error 错误信息
-     */
-    onError?: (error: string) => void;
-    onWillStatusChange?: (oldStatus: string, newStatus: string) => void;
-    language?: string;
-    accent?: string;
-    url?: string;
-    host?: string;
-  }
+export interface IatRecorderOptions {
+  APPID: string;
+  APIKey: string;
+  APISecret: string;
+  url?: string;
+  host?: string;
+  onTextChange?: (text: string) => void;
+  onWillStatusChange?: (oldStatus: string, newStatus: string) => void;
+  language?: string;
+  accent?: string;
+  workerUrl?: string;
+}
 
-  class XfVoiceDictation {
-    constructor(options: XfVoiceOptions);
-    start(): void;
-    stop(): void;
-    setStatus(status: string): void;
-    setResultText(params: { resultText?: string, resultTextTemp?: string }): void;
-    setParams(params: { language?: string, accent?: string }): void;
-  }
+export default class IatRecorder {
+  constructor(options: IatRecorderOptions);
 
-  export default XfVoiceDictation;
+  APPID: string;
+  APISecret: string;
+  APIKey: string;
+  url: string;
+  host: string;
+  onTextChange: (text: string) => void;
+  onWillStatusChange: (oldStatus: string, newStatus: string) => void;
+  status: string;
+  language: string;
+  accent: string;
+  streamRef: MediaStream[];
+  audioData: any[];
+  resultText: string;
+  resultTextTemp: string;
+  workerUrl: string;
 
-  export function useXfVoiceDictation(opts: XfVoiceOptions): React.MutableRefObject<XfVoiceDictation | null>;
+  getWebSocketUrl(): Promise<string>;
+  init(): void;
+  setStatus(status: string): void;
+  setResultText(params: { resultText?: string; resultTextTemp?: string }): void;
+  setParams(params: { language?: string; accent?: string }): void;
+  toBase64(buffer: any): string;
+  connectWebSocket(): Promise<void | boolean>;
+  recorderInit(): void;
+  webSocketSend(): void;
+  webSocketRes(resultData: string): void;
+  recorderStart(): void;
+  recorderStop(): void;
+  start(): void;
+  stop(): void;
 }

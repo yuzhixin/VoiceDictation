@@ -1,7 +1,12 @@
 {
   "name": "xf-voice",
   "version": "1.2.5",
-  "description": "讯飞语音听写(流式版)WebAPI的React/Node.js SDK",
+  "description": "讯飞语音听写(流式版)WebAPI 浏览器端SDK",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "transcode.worker.js"
+  ],
   "type": "module",
   "main": "index.js",
   "module": "index.js",
@@ -33,14 +38,9 @@
   "engines": {
     "node": ">=14.0.0"
   },
-  "peerDependencies": {
-    "react": ">=16.8.0",
-    "react-dom": ">=16.8.0"
-  },
   "exports": {
     ".": {
-      "import": "./index.js",
-      "require": "./index.js"
+      "import": "./index.js"
     }
   }
 }
