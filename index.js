@@ -20,6 +20,7 @@ class XfVoiceDictation {
 
         this.status = 'idle'; // 'idle' | 'ing' | 'end'
         this.resetInternal();
+        this.record = false;
     }
 
     resetInternal() {
@@ -92,7 +93,7 @@ class XfVoiceDictation {
 
     async start() {
         this.stop(); // 停止旧的并清理资源
-
+        this.record = true;
         if (!this.APPID || !this.APIKey || !this.APISecret) {
             this.onError('请正确配置【迅飞语音听写 WebAPI】服务接口认证信息！');
             return;
@@ -161,6 +162,7 @@ class XfVoiceDictation {
             }
         }
         this.destroy();
+        this.record = false;
     }
 
     destroy() {
@@ -209,7 +211,11 @@ class XfVoiceDictation {
 
         iatWS.onopen = () => {
             this.setStatus('ing');
-            setTimeout(() => this.webSocketSend(), 500);
+            setTimeout(() => {
+                if (this.record) {
+                    this.webSocketSend()
+                }
+            }, 500);
         };
 
         iatWS.onmessage = (e) => this.webSocketRes(e.data);
