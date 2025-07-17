@@ -5,10 +5,10 @@ export interface IatRecorderOptions {
   url?: string;
   host?: string;
   onTextChange?: (text: string) => void;
+  onError?: (text: string) => void;
   onWillStatusChange?: (oldStatus: string, newStatus: string) => void;
   language?: string;
   accent?: string;
-  workerUrl?: string;
 }
 
 export default class IatRecorder {
@@ -28,7 +28,6 @@ export default class IatRecorder {
   audioData: any[];
   resultText: string;
   resultTextTemp: string;
-  workerUrl: string;
 
   getWebSocketUrl(): Promise<string>;
   init(): void;

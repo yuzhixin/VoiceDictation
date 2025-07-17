@@ -4,8 +4,7 @@
   "description": "讯飞语音听写(流式版)WebAPI 浏览器端SDK",
   "files": [
     "index.js",
-    "index.d.ts",
-    "transcode.worker.js"
+    "index.d.ts"
   ],
   "type": "module",
   "main": "index.js",

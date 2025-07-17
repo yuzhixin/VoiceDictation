@@ -8,12 +8,13 @@ export default class IatRecorder {
         this.APIKey = opts.APIKey || '';
 
         // webSocket请求地址
-        this.url = opts.url || "wss://iat-api.xfyun.cn/v2/iat";
-        this.host = opts.host || "iat-api.xfyun.cn";
+        this.url = opts.url || "wss://iat.xf-yun.com/v1";
+        this.host = opts.host || "iat.xf-yun.com";
 
         // 识别监听方法
         this.onTextChange = opts.onTextChange || Function();
         this.onWillStatusChange = opts.onWillStatusChange || Function();
+        this.onError = opts.onError || Function();
 
         // 方言/语种
         this.status = 'null'
@@ -29,28 +30,24 @@ export default class IatRecorder {
         // wpgs下的听写结果需要中间状态辅助记录
         this.resultTextTemp = '';
         // 音频数据多线程
-        this.workerUrl = opts.workerUrl || './transcode.worker.js';
         this.init();
     };
 
     // 获取webSocket请求地址鉴权
     getWebSocketUrl() {
         return new Promise((resolve, reject) => {
-            const { url, host, APISecret, APIKey } = this;
-            // 请求地址根据语种不同变化
             try {
-                let date = new Date().toGMTString();
-                let algorithm = 'hmac-sha256';
-                let headers = 'host date request-line';
-                let signatureOrigin = `host: ${host}\ndate: ${date}\nGET /v2/iat HTTP/1.1`;
-                let signatureSha = CryptoJS.HmacSHA256(signatureOrigin, APISecret);
-                let signature = CryptoJS.enc.Base64.stringify(signatureSha);
-                let authorizationOrigin = `api_key="${APIKey}", algorithm="${algorithm}", headers="${headers}", signature="${signature}"`;
-                let authorization = btoa(authorizationOrigin);
-                resolve(`${url}?authorization=${authorization}&date=${date}&host=${host}`);
+                const date = new Date().toGMTString();
+                const signatureOrigin = `host: ${this.host}\ndate: ${date}\nGET /v1 HTTP/1.1`;
+                const signatureSha = CryptoJS.HmacSHA256(signatureOrigin, this.APISecret);
+                const signature = CryptoJS.enc.Base64.stringify(signatureSha);
+                const authorizationOrigin = `api_key="${this.APIKey}", algorithm="hmac-sha256", headers="host date request-line", signature="${signature}"`;
+                const encoder = new TextEncoder();
+                const authorization = btoa(String.fromCharCode(...encoder.encode(authorizationOrigin)));
+                resolve(`${this.url}?authorization=${authorization}&date=${date}&host=${this.host}`);
             } catch (error) {
                 reject(error);
-            };
+            }
         });
     };
 
@@ -59,18 +56,60 @@ export default class IatRecorder {
         const self = this;
         try {
             if (!self.APPID || !self.APIKey || !self.APISecret) {
-                alert('请正确配置【讯飞语音听写（流式版）WebAPI】服务接口认证信息！');
+                this.onError('请正确配置【迅飞语音听写 WebAPI】服务接口认证信息！');
                 return;
             }
-            self.webWorker = new Worker(self.workerUrl);
+            const workerScript = `
+            (() => {
+                const transAudioData = {
+                    to16kHz(audioData) {
+                        var data = new Float32Array(audioData);
+                        var fitCount = Math.round(data.length * (16000 / 44100));
+                        var newData = new Float32Array(fitCount);
+                        var springFactor = (data.length - 1) / (fitCount - 1);
+                        newData[0] = data[0];
+                        for (let i = 1; i < fitCount - 1; i++) {
+                            var tmp = i * springFactor;
+                            var before = Math.floor(tmp).toFixed();
+                            var after = Math.ceil(tmp).toFixed();
+                            var atPoint = tmp - before;
+                            newData[i] = data[before] + (data[after] - data[before]) * atPoint;
+                        }
+                        newData[fitCount - 1] = data[data.length - 1];
+                        return newData;
+                    },
+                    to16BitPCM(input) {
+                        var dataLength = input.length * (16 / 8);
+                        var dataBuffer = new ArrayBuffer(dataLength);
+                        var dataView = new DataView(dataBuffer);
+                        var offset = 0;
+                        for (var i = 0; i < input.length; i++, offset += 2) {
+                            var s = Math.max(-1, Math.min(1, input[i]));
+                            dataView.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+                        }
+                        return dataView;
+                    },
+                    transcode(audioData) {
+                        let output = transAudioData.to16kHz(audioData);
+                        output = transAudioData.to16BitPCM(output);
+                        output = Array.from(new Uint8Array(output.buffer));
+                        self.postMessage(output);
+                    }
+                };
+                self.onmessage = function (e) {
+                    transAudioData.transcode(e.data);
+                };
+            })()
+            `;
+            const blob = new Blob([workerScript], { type: 'application/javascript' });
+            const url = URL.createObjectURL(blob);
+            self.webWorker = new Worker(url);
             self.webWorker.onmessage = function (event) {
                 self.audioData.push(...event.data);
             };
         } catch (error) {
-            alert('对不起：请在服务器环境下运行！');
-            console.error('请在服务器如：WAMP、XAMPP、Phpstudy、http-server、WebServer等环境中运行！', error);
+            this.onError('对不起：请在服务器环境下运行！');
         };
-        console.log("%c ❤️使用说明：http://www.muguilin.com/blog/info/609bafc50d572b3fd79b058f", "font-size:32px; color:blue; font-weight: bold;");
     };
     // 修改录音听写状态
     setStatus(status) {
@@ -106,7 +145,7 @@ export default class IatRecorder {
             } else if ('MozWebSocket' in window) {
                 iatWS = new MozWebSocket(url);
             } else {
-                alert('浏览器不支持WebSocket!');
+                this.onError('浏览器不支持WebSocket');
                 return false;
             }
             this.webSocket = iatWS;
@@ -136,12 +175,12 @@ export default class IatRecorder {
             this.audioContext = this.audioContext ? this.audioContext : new (window.AudioContext || window.webkitAudioContext)();
             this.audioContext.resume();
             if (!this.audioContext) {
-                alert('浏览器不支持webAudioApi相关接口');
+                this.onError('浏览器不支持webAudioApi相关接口');
                 return false;
             }
         } catch (e) {
             if (!this.audioContext) {
-                alert('浏览器不支持webAudioApi相关接口');
+                this.onError('浏览器不支持webAudioApi相关接口');
                 return false;
             }
         };
@@ -168,7 +207,7 @@ export default class IatRecorder {
         };
         // 获取浏览器录音权限失败时回调
         let getMediaFail = (e) => {
-            alert('对不起：录音权限获取失败!');
+            this.onError('对不起：录音权限获取失败');
             this.audioContext && this.audioContext.close();
             this.audioContext = undefined;
             // 关闭websocket
@@ -200,7 +239,7 @@ export default class IatRecorder {
             if (navigator.userAgent.toLowerCase().match(/chrome/) && location.origin.indexOf('https://') < 0) {
                 console.error('获取浏览器录音功能，因安全性问题，需要在localhost 或 127.0.0.1 或 https 下才能获取权限！');
             } else {
-                alert('对不起：未识别到录音设备!');
+                this.onError('对不起：未识别到录音设备');
             }
             this.audioContext && this.audioContext.close();
             return false;
@@ -212,22 +251,36 @@ export default class IatRecorder {
         // 音频数据
         const audioData = this.audioData.splice(0, 1280);
         const params = {
-            common: {
+            header: {
                 app_id: this.APPID,
-            },
-            business: {
-                language: this.language, //小语种可在控制台--语音听写（流式）--方言/语种处添加试用
-                domain: 'iat',
-                accent: this.accent, //中文方言可在控制台--语音听写（流式）--方言/语种处添加试用
-                vad_eos: 5000,
-                dwa: 'wpgs' //为使该功能生效，需到控制台开通动态修正功能（该功能免费）
-            },
-            data: {
                 status: 0,
-                format: 'audio/L16;rate=16000',
-                encoding: 'raw',
-                audio: this.toBase64(audioData)
-            }
+            },
+            parameter: {
+                iat: {
+                    domain: 'slm',
+                    language: this.language,
+                    accent: this.accent,
+                    eos: 6000,
+                    vinfo: 1,
+                    dwa: 'wpgs',
+                    result: {
+                        encoding: 'utf8',
+                        compress: 'raw',
+                        format: 'json',
+                    },
+                },
+            },
+            payload: {
+                audio: {
+                    encoding: 'raw',
+                    sample_rate: 16000,
+                    channels: 1,
+                    bit_depth: 16,
+                    seq: 1,
+                    status: 0,
+                    audio: this.toBase64(audioData),
+                },
+            },
         };
         // 发送数据
         this.webSocket.send(JSON.stringify(params));
@@ -240,16 +293,21 @@ export default class IatRecorder {
             };
             if (this.audioData.length === 0) {
                 if (this.status === 'end') {
-                    this.webSocket.send(
-                        JSON.stringify({
-                            data: {
-                                status: 2,
-                                format: 'audio/L16;rate=16000',
+
+                    this.webSocket.send(JSON.stringify({
+                        header: { app_id: this.APPID, status: 2 },
+                        payload: {
+                            audio: {
                                 encoding: 'raw',
-                                audio: ''
-                            }
-                        })
-                    );
+                                sample_rate: 16000,
+                                channels: 1,
+                                bit_depth: 16,
+                                seq: 999,
+                                status: 2,
+                                audio: "",
+                            },
+                        },
+                    }));
                     this.audioData = [];
                     clearInterval(this.handlerInterval);
                 }
@@ -258,51 +316,37 @@ export default class IatRecorder {
             // 中间帧
             this.webSocket.send(
                 JSON.stringify({
-                    data: {
-                        status: 1,
-                        format: 'audio/L16;rate=16000',
-                        encoding: 'raw',
-                        audio: this.toBase64(this.audioData.splice(0, 1280))
-                    }
+                    header: { app_id: this.APPID, status: 1 },
+                    payload: {
+                        audio: {
+                            encoding: 'raw',
+                            sample_rate: 16000,
+                            channels: 1,
+                            bit_depth: 16,
+                            seq: 2,
+                            status: 1,
+                            audio: this.toBase64(this.audioData.splice(0, 1280)),
+                        },
+                    },
                 })
             );
         }, 40);
     };
     // 识别结束 webSocket返回数据
     webSocketRes(resultData) {
-        let jsonData = JSON.parse(resultData);
-        if (jsonData.data && jsonData.data.result) {
-            let data = jsonData.data.result;
-            let str = '';
-            let ws = data.ws;
-            for (let i = 0; i < ws.length; i++) {
-                str = str + ws[i].cw[0].w;
-            }
-            // 开启wpgs会有此字段(前提：在控制台开通动态修正功能)
-            // 取值为 "apd"时表示该片结果是追加到前面的最终结果；取值为"rpl" 时表示替换前面的部分结果，替换范围为rg字段
-            if (data.pgs) {
-                if (data.pgs === 'apd') {
-                    // 将resultTextTemp同步给resultText
-                    this.setResultText({
-                        resultText: this.resultTextTemp
-                    });
-                }
-                // 将结果存储在resultTextTemp中
-                this.setResultText({
-                    resultTextTemp: this.resultText + str
-                });
-            } else {
-                this.setResultText({
-                    resultText: this.resultText + str
-                });
+        const jsonData = JSON.parse(resultData);
+        if (jsonData.payload?.result) {
+            const text = this.base64ToUtf8(jsonData.payload.result.text);
+            const result = JSON.parse(text);
+            if (result.ws) {
+                const current = result.ws.map(ws => ws.cw.map(cw => cw.w).join('')).join('');
+                this.textSegments.push({ pgs: result.pgs, text: current });
+                const finalText = this.concatText(this.textSegments);
+                this.setResultText({ resultText: finalText });
             }
         }
-        if (jsonData.code === 0 && jsonData.data.status === 2) {
+        if (jsonData.header?.status === 2) {
             this.webSocket.close();
-        }
-        if (jsonData.code !== 0) {
-            this.webSocket.close();
-            console.error(`error code: ${jsonData.code}, reason: ${jsonData.message}`);
         }
     };
     // 启动录音
@@ -321,11 +365,6 @@ export default class IatRecorder {
             this.audioContext && this.audioContext.suspend();
         }
         this.setStatus('end');
-        try {
-            this.streamRef.getTracks().forEach(track => track.stop());
-        } catch (error) {
-            console.error('暂停失败!', error);
-        }
     };
     // 开始
     start() {
@@ -337,3 +376,4 @@ export default class IatRecorder {
         this.recorderStop();
     };
 }
+
